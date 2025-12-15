@@ -1,3 +1,4 @@
+import argparse
 import random
 import os
 import pandas as pd
@@ -9,22 +10,31 @@ import plotly.graph_objs as go
 import nibabel as nib
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.layers import Conv3DTranspose as KConv3DTranspose
+from tensorflow.keras.utils import register_keras_serializable
 import config
 from Model import DiceCoefficientLoss
 import plotly
 
-import dash
-import dash_core_components as dcc
-import dash_html_components as html
-from dash.dependencies import Input, Output, State
+from dash import Dash, dcc, html, Input, Output, State
 
 import datetime
 import json
 import io
 import base64
-from base64 import decodestring
+from pathlib import Path
 
 """#### Loading model"""
+
+
+@register_keras_serializable()
+class CompatConv3DTranspose(KConv3DTranspose):
+    """Compatibility wrapper to ignore unsupported 'groups' arg in saved H5."""
+
+    @classmethod
+    def from_config(cls, config):
+        config.pop("groups", None)
+        return super().from_config(config)
 
 
 def dice(y_true, y_pred):
@@ -95,7 +105,14 @@ def gen_dice_loss(y_true, y_pred):
 
 # model_path=config.MODEL_PATH
 
-model = tf.keras.models.load_model('finalvalaug.h5', custom_objects={'gen_dice_loss': gen_dice_loss, 'dice_whole_metric':dice_whole_metric, 'dice_en_metric': dice_en_metric, 'dice_core_metric': dice_core_metric})
+custom_objs = {
+    'gen_dice_loss': gen_dice_loss,
+    'dice_whole_metric': dice_whole_metric,
+    'dice_en_metric': dice_en_metric,
+    'dice_core_metric': dice_core_metric,
+    'Conv3DTranspose': CompatConv3DTranspose,
+}
+model = tf.keras.models.load_model('finalvalaug.h5', custom_objects=custom_objs, compile=False)
 
 """### Prediction """
 
@@ -294,61 +311,446 @@ def input_image(image):
 
     return fig1, fig2
 
-external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
-app = dash.Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
+external_stylesheets = []
+app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
 
-app.layout = html.Div([
-    dcc.Location(id='url', refresh=False),
-    html.Div(id='page-content')
-])
+# ---------- Global Theming ----------
+BLACK = "#050509"
+ORANGE = "#ff7a1a"
+LIGHT_ORANGE = "#ffb347"
+LIGHT_BLUE = "#52c7ff"
+GLASS_BG = "rgba(15, 15, 25, 0.85)"
 
-colors = {
-    'background': '#111111'
-}
-fig_1,fig_2 = input_image("test4d.nii.gz")
-index_page = html.Div(style={'backgroundColor': colors['background']}, children=[html.Div("Brain Tumor Segmentation",style= {"color": "white",
-                                                      "text-align": "center","background-color": colors['background'], "font-size": "40px"}),
-    dcc.Link(html.Button('Test your Brain Image'), href='/upload'),
-    html.Br(),
-    html.Div([
-        html.Div([
-            dcc.Graph(id='g1', figure=fig_1)
-        ], className="six columns"),
+fig_1, fig_2 = input_image("test4d.nii.gz")
 
-        html.Div([
-            dcc.Graph(id='g2', figure=fig_2)
-        ], className="six columns"),
-    ], className="row")
-])
+app.layout = html.Div(
+    [
+        # Custom CSS for glassmorphism + hover effects
+        html.Style(
+            """
+            body {
+                margin: 0;
+                padding: 0;
+                background: radial-gradient(circle at top left, #181820 0, #050509 45%, #000000 100%);
+                font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                color: #f5f7ff;
+            }
+            .glass-shell {
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                align-items: stretch;
+                justify-content: stretch;
+                background: radial-gradient(circle at top left, #181820 0, #050509 45%, #000000 100%);
+            }
+            .nav-bar {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 18px 42px;
+                position: sticky;
+                top: 0;
+                z-index: 10;
+                backdrop-filter: blur(14px);
+                background: linear-gradient(90deg, rgba(5,5,9,0.96), rgba(12,12,18,0.92));
+                border-bottom: 1px solid rgba(255,255,255,0.04);
+            }
+            .nav-title {
+                font-weight: 700;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+                font-size: 0.9rem;
+                color: #fefefe;
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+            }
+            .nav-pill {
+                width: 9px;
+                height: 9px;
+                border-radius: 999px;
+                background: linear-gradient(145deg, #ffb347, #ff7a1a);
+                box-shadow: 0 0 12px rgba(255, 138, 76, 0.8);
+            }
+            .nav-links {
+                display: flex;
+                gap: 0.75rem;
+                align-items: center;
+            }
+            .primary-btn, .ghost-btn {
+                border-radius: 999px;
+                padding: 9px 18px;
+                border: none;
+                font-size: 0.85rem;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+                backdrop-filter: blur(10px);
+                transition: all 0.18s ease-out;
+            }
+            .primary-btn {
+                background: linear-gradient(135deg, #52c7ff, #b4fffd);
+                color: #020307;
+                box-shadow: 0 12px 30px rgba(82, 199, 255, 0.28);
+            }
+            .primary-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 16px 40px rgba(82, 199, 255, 0.4);
+            }
+            .ghost-btn {
+                background: rgba(255, 255, 255, 0.02);
+                color: #c0c4ff;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+            }
+            .ghost-btn:hover {
+                background: rgba(255, 255, 255, 0.06);
+                transform: translateY(-1px);
+            }
+            .main-grid {
+                flex: 1;
+                display: flex;
+                flex-direction: row;
+                padding: 22px 42px 40px;
+                gap: 24px;
+            }
+            @media (max-width: 1024px) {
+                .main-grid {
+                    flex-direction: column;
+                    padding: 18px 18px 28px;
+                }
+            }
+            .glass-card {
+                flex: 1;
+                background: rgba(15, 15, 25, 0.88);
+                border-radius: 28px;
+                padding: 24px 26px;
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                box-shadow:
+                    0 24px 60px rgba(0, 0, 0, 0.7),
+                    0 0 0 1px rgba(255, 255, 255, 0.03);
+                backdrop-filter: blur(22px);
+                display: flex;
+                flex-direction: column;
+                gap: 18px;
+            }
+            .hero-eyebrow {
+                font-size: 0.78rem;
+                letter-spacing: 0.26em;
+                text-transform: uppercase;
+                color: rgba(255, 255, 255, 0.6);
+            }
+            .hero-title {
+                font-size: 2.2rem;
+                line-height: 1.1;
+                font-weight: 750;
+                letter-spacing: 0.02em;
+            }
+            .hero-highlight {
+                background: linear-gradient(120deg, #ffb347, #ff7a1a, #ffea82);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+            .hero-subtitle {
+                font-size: 0.98rem;
+                color: rgba(235, 238, 255, 0.82);
+                max-width: 480px;
+            }
+            .chip-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+            .chip {
+                padding: 4px 10px;
+                border-radius: 999px;
+                font-size: 0.7rem;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                background: rgba(255, 255, 255, 0.02);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                color: rgba(244, 247, 255, 0.88);
+            }
+            .metrics-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 1.5rem;
+                margin-top: 8px;
+            }
+            .metric-pill {
+                min-width: 120px;
+                padding: 10px 14px;
+                border-radius: 18px;
+                background: radial-gradient(circle at top left, rgba(255, 122, 26, 0.34), rgba(0,0,0,0.5));
+                border: 1px solid rgba(255, 186, 120, 0.35);
+            }
+            .metric-label {
+                font-size: 0.7rem;
+                text-transform: uppercase;
+                letter-spacing: 0.14em;
+                color: rgba(255, 237, 217, 0.78);
+            }
+            .metric-value {
+                font-size: 1.1rem;
+                font-weight: 640;
+                color: #fff5e6;
+            }
+            .upload-zone {
+                border-radius: 22px;
+                border: 1px dashed rgba(120, 215, 255, 0.85);
+                background: radial-gradient(circle at top left, rgba(82,199,255,0.14), rgba(13,19,33,0.9));
+                padding: 32px 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+                text-align: center;
+                color: #e7f6ff;
+            }
+            .upload-caption {
+                font-size: 0.8rem;
+                color: rgba(203, 222, 255, 0.88);
+            }
+            .upload-note {
+                font-size: 0.75rem;
+                color: rgba(185, 205, 255, 0.7);
+            }
+            .results-grid {
+                display: flex;
+                flex-direction: row;
+                gap: 18px;
+                margin-top: 10px;
+            }
+            @media (max-width: 1200px) {
+                .results-grid {
+                    flex-direction: column;
+                }
+            }
+            .result-panel {
+                flex: 1;
+                border-radius: 22px;
+                background: radial-gradient(circle at top left, rgba(255,122,26,0.18), rgba(8,8,14,0.96));
+                border: 1px solid rgba(255, 255, 255, 0.04);
+                padding: 12px 12px 4px;
+            }
+            .result-heading {
+                font-size: 0.8rem;
+                letter-spacing: 0.18em;
+                text-transform: uppercase;
+                color: rgba(255, 240, 220, 0.78);
+                margin-bottom: 4px;
+            }
+            """
+        ),
+        dcc.Location(id="url", refresh=False),
+        html.Div(id="page-content", className="glass-shell"),
+    ]
+)
 
-page_1_layout = html.Div(style={'backgroundColor': colors['background']}, children=[html.Div("Brain Tumor Segmentation",style= {"color": "white",
-                                                      "text-align": "center","background-color": colors['background'], "font-size": "40px"}),
+index_page = html.Div(
+    className="glass-shell",
+    children=[
+        html.Div(
+            className="nav-bar",
+            children=[
+                html.Div(
+                    className="nav-title",
+                    children=[html.Div(className="nav-pill"), "NeuroGlass · 3D Tumor Segmentation"],
+                ),
+                html.Div(
+                    className="nav-links",
+                    children=[
+                        dcc.Link(
+                            html.Button("Upload Volume", className="primary-btn"),
+                            href="/upload",
+                            style={"textDecoration": "none"},
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        html.Div(
+            className="main-grid",
+            children=[
+                # Left: Hero / copy
+                html.Div(
+                    className="glass-card",
+                    children=[
+                        html.Div("CLINICAL‑GRADE PIPELINE", className="hero-eyebrow"),
+                        html.Div(
+                            [
+                                html.Span("3D Brain Tumor ", className="hero-title"),
+                                html.Span("Segmentation", className="hero-title hero-highlight"),
+                            ]
+                        ),
+                        html.Div(
+                            "Visualize volumetric MRIs and overlay model predictions in an immersive 3D viewer. "
+                            "Upload a NIfTI volume and explore every slice in one interactive canvas.",
+                            className="hero-subtitle",
+                        ),
+                        html.Div(
+                            className="chip-row",
+                            children=[
+                                html.Div("4‑Channel MRI", className="chip"),
+                                html.Div("3D U‑Net", className="chip"),
+                                html.Div("Interactive viewer", className="chip"),
+                            ],
+                        ),
+                        html.Div(
+                            className="metrics-row",
+                            children=[
+                                html.Div(
+                                    className="metric-pill",
+                                    children=[
+                                        html.Div("Sample Volume", className="metric-label"),
+                                        html.Div("160 × 192 × 128", className="metric-value"),
+                                    ],
+                                ),
+                                html.Div(
+                                    className="metric-pill",
+                                    children=[
+                                        html.Div("Tumor Regions", className="metric-label"),
+                                        html.Div("Whole · Core · Enh.", className="metric-value"),
+                                    ],
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            style={"display": "flex", "gap": "0.75rem", "marginTop": "12px"},
+                            children=[
+                                dcc.Link(
+                                    html.Button("Upload your scan", className="primary-btn"),
+                                    href="/upload",
+                                    style={"textDecoration": "none"},
+                                ),
+                                dcc.Link(
+                                    html.Button("View sample", className="ghost-btn"),
+                                    href="/",
+                                    style={"textDecoration": "none"},
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                # Right: Sample visualization
+                html.Div(
+                    className="glass-card",
+                    children=[
+                        html.Div("Sample Prediction", className="result-heading"),
+                        html.Div(
+                            "Preview from built‑in reference volume (test4d.nii.gz). Use Upload to run your own.",
+                            className="upload-note",
+                        ),
+                        html.Div(
+                            className="results-grid",
+                            children=[
+                                html.Div(
+                                    className="result-panel",
+                                    children=[
+                                        html.Div("Input MRI", className="result-heading"),
+                                        dcc.Graph(id="sample_g1", figure=fig_1, config={"displaylogo": False}),
+                                    ],
+                                ),
+                                html.Div(
+                                    className="result-panel",
+                                    children=[
+                                        html.Div("Predicted Mask", className="result-heading"),
+                                        dcc.Graph(id="sample_g2", figure=fig_2, config={"displaylogo": False}),
+                                    ],
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ],
+)
 
-    dcc.Upload(
-        id='upload-image',
-        children=html.Div([
-            'Drag and Drop or ',
-            html.A('Select Files')
-        ]),
-        style={'color': 'white',
-            'width': '100%',
-            'height': '60px',
-            'lineHeight': '60px',
-            'borderWidth': '1px',
-            'borderStyle': 'dashed',
-            'borderRadius': '5px',
-            'textAlign': 'center',
-            'margin': '10px'
-        },
-        # Allow multiple files to be uploaded
-        multiple=True
-    ),
-    html.Div(id='output-image-upload'),
-    dcc.Link(html.Button('Home Page'), href='/')
-]),
+page_1_layout = html.Div(
+    className="glass-shell",
+    children=[
+        html.Div(
+            className="nav-bar",
+            children=[
+                html.Div(
+                    className="nav-title",
+                    children=[html.Div(className="nav-pill"), "NeuroGlass · Upload"],
+                ),
+                html.Div(
+                    className="nav-links",
+                    children=[
+                        dcc.Link(
+                            html.Button("Back to sample", className="ghost-btn"),
+                            href="/",
+                            style={"textDecoration": "none"},
+                        ),
+                    ],
+                ),
+            ],
+        ),
+        html.Div(
+            className="main-grid",
+            children=[
+                html.Div(
+                    className="glass-card",
+                    children=[
+                        html.Div("UPLOAD 3D VOLUME", className="hero-eyebrow"),
+                        html.Div(
+                            [
+                                html.Span("Run inference on ", className="hero-title"),
+                                html.Span("your own data", className="hero-title hero-highlight"),
+                            ]
+                        ),
+                        html.Div(
+                            "Drop a 4‑channel NIfTI volume (.nii or .nii.gz). "
+                            "We will crop, normalize and run the pre‑trained model in real‑time.",
+                            className="hero-subtitle",
+                        ),
+                        html.Div(
+                            className="chip-row",
+                            children=[
+                                html.Div("Format: NIfTI", className="chip"),
+                                html.Div("Shape: 160×192×128", className="chip"),
+                            ],
+                        ),
+                        dcc.Upload(
+                            id="upload-image",
+                            className="upload-zone",
+                            children=[
+                                html.Div("Drop NIfTI volume here", style={"fontWeight": 600}),
+                                html.Div("or click to browse your filesystem", className="upload-caption"),
+                                html.Div(
+                                    "Accepted: .nii / .nii.gz | Single 4‑channel volume",
+                                    className="upload-note",
+                                ),
+                            ],
+                            multiple=True,
+                        ),
+                    ],
+                ),
+                html.Div(
+                    className="glass-card",
+                    children=[
+                        html.Div("Prediction Viewer", className="result-heading"),
+                        html.Div(
+                            "After upload, the MRI and segmentation animation will appear below.",
+                            className="upload-note",
+                        ),
+                        html.Div(id="output-image-upload", className="results-grid"),
+                    ],
+                ),
+            ],
+        ),
+    ],
+)
 
-def parse_contents(contents):
-    img, msk= input_image(contents)
+def parse_contents(filename):
+    # Load and render a single saved NIfTI file by filename
+    img, msk = input_image(filename)
     return html.Div([
         html.Div([
             dcc.Graph(id='g1', figure=img)
@@ -360,23 +762,39 @@ def parse_contents(contents):
     ], className="row")
 
 
-@app.callback(Output('output-image-upload', 'children'),
-              [Input('upload-image', 'contents')])
-
-def update_output(image):
-    if not image:
+@app.callback(
+    Output('output-image-upload', 'children'),
+    Input('upload-image', 'contents'),
+    State('upload-image', 'filename'),
+)
+def update_output(image_contents, filenames):
+    if not image_contents or not filenames:
         return
 
-    for i, image_str in enumerate(image):
-        data = image_str.encode("utf8").split(b";base64,")[1]
-        with open(f"BrainTumorData/imagesTest/image_{i+1}.nii", "wb") as fp:
-            fp.write(base64.decodebytes(data))
+    saved_files = []
+    os.makedirs(config.IMAGES_DATA_DIR, exist_ok=True)
 
-    children = [parse_contents("image_1.nii")]
-    return children
+    for content_str, original_name in zip(image_contents, filenames):
+        ext = "".join(Path(original_name).suffixes) or ".nii"
+        # Only accept NIfTI uploads
+        if ext.lower() not in [".nii", ".nii.gz"]:
+            return html.Div(
+                "Please upload NIfTI files (.nii or .nii.gz).",
+                style={"color": "red", "padding": "10px"},
+            )
 
-@app.callback(dash.dependencies.Output('page-content', 'children'),
-              [dash.dependencies.Input('url', 'pathname')])
+        data = content_str.split(",")[1]
+        save_name = f"image_{len(saved_files)+1}{ext}"
+        save_path = Path(config.IMAGES_DATA_DIR) / save_name
+        with open(save_path, "wb") as fp:
+            fp.write(base64.b64decode(data))
+        saved_files.append(save_name)
+
+    # Only display the first uploaded file for now
+    return [parse_contents(saved_files[0])]
+
+@app.callback(Output('page-content', 'children'),
+              [Input('url', 'pathname')])
 
 def display_page(pathname):
     if pathname == '/upload':
@@ -385,4 +803,13 @@ def display_page(pathname):
         return index_page
 
 if __name__ == '__main__':
-    app.run_server(debug=True, port=8080)
+    parser = argparse.ArgumentParser(description="Run Dash app")
+    default_port = int(os.environ.get("PORT", 8060))
+    default_host = os.environ.get("HOST", "0.0.0.0")
+    parser.add_argument("--port", type=int, default=default_port, help="Port to run the server on")
+    parser.add_argument("--host", type=str, default=default_host, help="Host address to bind")
+    parser.add_argument("--debug", action="store_true", help="Enable Dash debug mode")
+    args = parser.parse_args()
+
+    # Dash 3 deprecates run_server in favor of run
+    app.run(debug=args.debug, host=args.host, port=args.port)
