@@ -63,6 +63,13 @@ Run the application file : <code>python application.py</code>
 The rest is simple. The application shows a preview MRI scan, and it also has an option of uploading
 new MRI images. The website frontend makes it easy to understand
 
+### Inference, performance, and deployment
+- The CLI now supports TensorFlow **or** ONNX Runtime backends (configurable in `config.py` via `INFERENCE_BACKEND`, `TF_MODEL_PATH`, and `ONNX_MODEL_PATH`).
+- Export a Keras checkpoint to ONNX: `python infer.py --export-onnx finalvalaug.onnx --tf-model finalvalaug.h5 --opset 13 --force-export`
+- Single-case inference (4D input): `python infer.py --input-4d BrainTumorData/imagesTest/test4d.nii.gz --out outputs/single_tf --backend tf`
+- Use ONNX for faster inference: `python infer.py --input-4d BrainTumorData/imagesTest/test4d.nii.gz --out outputs/single_onnx --backend onnx --onnx-model finalvalaug.onnx`
+- Batch a folder of patients and write a summary CSV: `python infer.py --patients-dir BrainTumorData/imagesTest --out outputs/batch --backend onnx --summary-name summary.csv --limit 10`
+
 <h2 id="Model">Model</h2>
 
 One of the most basic architectures for segmentation tasks in a UNet achitecture. It has an 
