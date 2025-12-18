@@ -7,7 +7,9 @@ import tensorflow.keras.backend as K
 import tensorflow.keras as keras
 import tensorflow as tf
 import plotly.graph_objs as go
+import plotly.io as pio
 import nibabel as nib
+from skimage import measure
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.layers import Conv3DTranspose as KConv3DTranspose
@@ -15,6 +17,7 @@ from tensorflow.keras.utils import register_keras_serializable
 import config
 from Model import DiceCoefficientLoss
 import plotly
+import dash
 
 from dash import Dash, dcc, html, Input, Output, State
 
@@ -22,6 +25,8 @@ import datetime
 import json
 import io
 import base64
+import re
+from typing import Tuple, Dict, Any, List, Optional
 from pathlib import Path
 
 """#### Loading model"""
@@ -145,25 +150,20 @@ def normalize(image):
 def input_image(image):
     image_path = os.path.join(config.IMAGES_DATA_DIR, image)
     img = nib.load(image_path)
-    image_data = img.dataobj
-    image_data = np.asarray(image_data)
+    affine = img.affine
+    image_data = np.asarray(img.dataobj)
 
     image_data = image_data[34:194, 22:214, 13:141, ]
     image_data = normalize(image_data)
-    # Reshaping the Input Image and Ground Truth(Mask)
     reshaped_image_data=image_data.reshape(1,160,192,128,4)
-
-    print(reshaped_image_data.shape)
-    print(type(reshaped_image_data))
 
     # Prediction - Our Segmentation
     Y_hat = model.predict(x=reshaped_image_data)
     Y_hat = np.argmax(Y_hat, axis=-1)
-    print(f"Y_hat shape - {Y_hat.shape}")
 
     # Read the Input Image and Predicted Mask
-    image = reshaped_image_data[0, :, :, :, 0].T
-    mask = Y_hat[0].T
+    image = reshaped_image_data[0, :, :, :, 0]  # keep (160,192,128)
+    mask = Y_hat[0]  # (160,192,128)
 
     # For Colorscale
     pl_bone=[[0.0, 'rgb(0, 0, 0)'],
@@ -309,7 +309,7 @@ def input_image(image):
     fig1 = go.Figure(data=[initial_slice], layout=layout3d, frames=frames)
     fig2 = go.Figure(data=[initial_slice_m], layout=layout3d_m, frames=frames_m)
 
-    return fig1, fig2
+    return fig1, fig2, image, mask, affine
 
 external_stylesheets = []
 app = Dash(__name__, external_stylesheets=external_stylesheets, suppress_callback_exceptions=True)
@@ -320,232 +320,23 @@ ORANGE = "#ff7a1a"
 LIGHT_ORANGE = "#ffb347"
 LIGHT_BLUE = "#52c7ff"
 GLASS_BG = "rgba(15, 15, 25, 0.85)"
+MAX_FILE_MB = 400
+EXPECTED_MASK_SHAPE = (160, 192, 128)
 
-fig_1, fig_2 = input_image("test4d.nii.gz")
+fig_1, fig_2, sample_vol, sample_mask, sample_affine = input_image("test4d.nii.gz")
 
 app.layout = html.Div(
     [
-        # Custom CSS for glassmorphism + hover effects
-        html.Style(
-            """
-            body {
-                margin: 0;
-                padding: 0;
-                background: radial-gradient(circle at top left, #181820 0, #050509 45%, #000000 100%);
-                font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-                color: #f5f7ff;
-            }
-            .glass-shell {
-                min-height: 100vh;
-                display: flex;
-                flex-direction: column;
-                align-items: stretch;
-                justify-content: stretch;
-                background: radial-gradient(circle at top left, #181820 0, #050509 45%, #000000 100%);
-            }
-            .nav-bar {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                padding: 18px 42px;
-                position: sticky;
-                top: 0;
-                z-index: 10;
-                backdrop-filter: blur(14px);
-                background: linear-gradient(90deg, rgba(5,5,9,0.96), rgba(12,12,18,0.92));
-                border-bottom: 1px solid rgba(255,255,255,0.04);
-            }
-            .nav-title {
-                font-weight: 700;
-                letter-spacing: 0.08em;
-                text-transform: uppercase;
-                font-size: 0.9rem;
-                color: #fefefe;
-                display: flex;
-                align-items: center;
-                gap: 0.5rem;
-            }
-            .nav-pill {
-                width: 9px;
-                height: 9px;
-                border-radius: 999px;
-                background: linear-gradient(145deg, #ffb347, #ff7a1a);
-                box-shadow: 0 0 12px rgba(255, 138, 76, 0.8);
-            }
-            .nav-links {
-                display: flex;
-                gap: 0.75rem;
-                align-items: center;
-            }
-            .primary-btn, .ghost-btn {
-                border-radius: 999px;
-                padding: 9px 18px;
-                border: none;
-                font-size: 0.85rem;
-                letter-spacing: 0.04em;
-                text-transform: uppercase;
-                cursor: pointer;
-                display: inline-flex;
-                align-items: center;
-                gap: 0.4rem;
-                backdrop-filter: blur(10px);
-                transition: all 0.18s ease-out;
-            }
-            .primary-btn {
-                background: linear-gradient(135deg, #52c7ff, #b4fffd);
-                color: #020307;
-                box-shadow: 0 12px 30px rgba(82, 199, 255, 0.28);
-            }
-            .primary-btn:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 16px 40px rgba(82, 199, 255, 0.4);
-            }
-            .ghost-btn {
-                background: rgba(255, 255, 255, 0.02);
-                color: #c0c4ff;
-                border: 1px solid rgba(255, 255, 255, 0.08);
-            }
-            .ghost-btn:hover {
-                background: rgba(255, 255, 255, 0.06);
-                transform: translateY(-1px);
-            }
-            .main-grid {
-                flex: 1;
-                display: flex;
-                flex-direction: row;
-                padding: 22px 42px 40px;
-                gap: 24px;
-            }
-            @media (max-width: 1024px) {
-                .main-grid {
-                    flex-direction: column;
-                    padding: 18px 18px 28px;
-                }
-            }
-            .glass-card {
-                flex: 1;
-                background: rgba(15, 15, 25, 0.88);
-                border-radius: 28px;
-                padding: 24px 26px;
-                border: 1px solid rgba(255, 255, 255, 0.06);
-                box-shadow:
-                    0 24px 60px rgba(0, 0, 0, 0.7),
-                    0 0 0 1px rgba(255, 255, 255, 0.03);
-                backdrop-filter: blur(22px);
-                display: flex;
-                flex-direction: column;
-                gap: 18px;
-            }
-            .hero-eyebrow {
-                font-size: 0.78rem;
-                letter-spacing: 0.26em;
-                text-transform: uppercase;
-                color: rgba(255, 255, 255, 0.6);
-            }
-            .hero-title {
-                font-size: 2.2rem;
-                line-height: 1.1;
-                font-weight: 750;
-                letter-spacing: 0.02em;
-            }
-            .hero-highlight {
-                background: linear-gradient(120deg, #ffb347, #ff7a1a, #ffea82);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-            }
-            .hero-subtitle {
-                font-size: 0.98rem;
-                color: rgba(235, 238, 255, 0.82);
-                max-width: 480px;
-            }
-            .chip-row {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 0.5rem;
-            }
-            .chip {
-                padding: 4px 10px;
-                border-radius: 999px;
-                font-size: 0.7rem;
-                text-transform: uppercase;
-                letter-spacing: 0.12em;
-                background: rgba(255, 255, 255, 0.02);
-                border: 1px solid rgba(255, 255, 255, 0.06);
-                color: rgba(244, 247, 255, 0.88);
-            }
-            .metrics-row {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 1.5rem;
-                margin-top: 8px;
-            }
-            .metric-pill {
-                min-width: 120px;
-                padding: 10px 14px;
-                border-radius: 18px;
-                background: radial-gradient(circle at top left, rgba(255, 122, 26, 0.34), rgba(0,0,0,0.5));
-                border: 1px solid rgba(255, 186, 120, 0.35);
-            }
-            .metric-label {
-                font-size: 0.7rem;
-                text-transform: uppercase;
-                letter-spacing: 0.14em;
-                color: rgba(255, 237, 217, 0.78);
-            }
-            .metric-value {
-                font-size: 1.1rem;
-                font-weight: 640;
-                color: #fff5e6;
-            }
-            .upload-zone {
-                border-radius: 22px;
-                border: 1px dashed rgba(120, 215, 255, 0.85);
-                background: radial-gradient(circle at top left, rgba(82,199,255,0.14), rgba(13,19,33,0.9));
-                padding: 32px 20px;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                gap: 10px;
-                text-align: center;
-                color: #e7f6ff;
-            }
-            .upload-caption {
-                font-size: 0.8rem;
-                color: rgba(203, 222, 255, 0.88);
-            }
-            .upload-note {
-                font-size: 0.75rem;
-                color: rgba(185, 205, 255, 0.7);
-            }
-            .results-grid {
-                display: flex;
-                flex-direction: row;
-                gap: 18px;
-                margin-top: 10px;
-            }
-            @media (max-width: 1200px) {
-                .results-grid {
-                    flex-direction: column;
-                }
-            }
-            .result-panel {
-                flex: 1;
-                border-radius: 22px;
-                background: radial-gradient(circle at top left, rgba(255,122,26,0.18), rgba(8,8,14,0.96));
-                border: 1px solid rgba(255, 255, 255, 0.04);
-                padding: 12px 12px 4px;
-            }
-            .result-heading {
-                font-size: 0.8rem;
-                letter-spacing: 0.18em;
-                text-transform: uppercase;
-                color: rgba(255, 240, 220, 0.78);
-                margin-bottom: 4px;
-            }
-            """
-        ),
         dcc.Location(id="url", refresh=False),
+        # Large arrays must not be persisted; keep strictly in memory
+        dcc.Store(id="vol-store", storage_type="memory"),
+        dcc.Store(id="mask-store", storage_type="memory"),
+        dcc.Store(id="holo-store", storage_type="memory"),
+        # Small metadata can be storage-backed if desired (affine/case id only)
+        dcc.Store(id="meta-store", storage_type="session"),
+        dcc.Store(id="case-store", storage_type="session"),
+        # Internal init flag stored in session so the one-time purge runs only once per session
+        dcc.Store(id="init-flag", storage_type="session"),
         html.Div(id="page-content", className="glass-shell"),
     ]
 )
@@ -573,69 +364,108 @@ index_page = html.Div(
             ],
         ),
         html.Div(
-            className="main-grid",
+            className="landing-stack",
             children=[
-                # Left: Hero / copy
+                # Top: Full-width Clinical-Grade Pipeline banner
                 html.Div(
                     className="glass-card",
                     children=[
-                        html.Div("CLINICAL‑GRADE PIPELINE", className="hero-eyebrow"),
+                        html.Div("CLINICAL‑GRADE", className="hero-eyebrow"),
                         html.Div(
                             [
-                                html.Span("3D Brain Tumor ", className="hero-title"),
-                                html.Span("Segmentation", className="hero-title hero-highlight"),
+                                html.Span("Clinical‑Grade 3D Brain Tumor ", className="hero-title"),
+                                html.Span("Segmentation Pipeline", className="hero-title hero-highlight"),
                             ]
                         ),
                         html.Div(
-                            "Visualize volumetric MRIs and overlay model predictions in an immersive 3D viewer. "
-                            "Upload a NIfTI volume and explore every slice in one interactive canvas.",
-                            className="hero-subtitle",
-                        ),
-                        html.Div(
-                            className="chip-row",
+                            style={
+                                "display": "flex",
+                                "gap": "28px",
+                                "alignItems": "flex-start",
+                                "justifyContent": "space-between",
+                                "flexWrap": "wrap",
+                            },
                             children=[
-                                html.Div("4‑Channel MRI", className="chip"),
-                                html.Div("3D U‑Net", className="chip"),
-                                html.Div("Interactive viewer", className="chip"),
-                            ],
-                        ),
-                        html.Div(
-                            className="metrics-row",
-                            children=[
+                                # Left: Descriptive text (primary)
                                 html.Div(
-                                    className="metric-pill",
                                     children=[
-                                        html.Div("Sample Volume", className="metric-label"),
-                                        html.Div("160 × 192 × 128", className="metric-value"),
+                                        html.Div(
+                                            "Automated 3D MRI tumor segmentation built for clarity and speed. "
+                                            "Accepts 4‑channel NIfTI volumes and produces interactive visualizations "
+                                            "to explore, validate, and understand tumor regions across the whole brain.",
+                                            className="hero-subtitle",
+                                        ),
                                     ],
+                                    style={
+                                        "display": "flex",
+                                        "flexDirection": "column",
+                                        "rowGap": "10px",
+                                        "flex": "2 1 600px",
+                                        "minWidth": "420px",
+                                        "maxWidth": "760px",
+                                    },
                                 ),
+                                # Right: Technical summary (secondary)
                                 html.Div(
-                                    className="metric-pill",
                                     children=[
-                                        html.Div("Tumor Regions", className="metric-label"),
-                                        html.Div("Whole · Core · Enh.", className="metric-value"),
+                                        html.Div(
+                                            className="chip-row",
+                                            children=[
+                                                html.Div("4‑Channel MRI", className="chip"),
+                                                html.Div("3D U‑Net", className="chip"),
+                                                html.Div("Interactive viewer", className="chip"),
+                                            ],
+                                        ),
+                                        html.Div(
+                                            className="metrics-row",
+                                            children=[
+                                                html.Div(
+                                                    className="metric-pill",
+                                                    children=[
+                                                        html.Div("Sample Volume", className="metric-label"),
+                                                        html.Div("160 × 192 × 128", className="metric-value"),
+                                                    ],
+                                                ),
+                                                html.Div(
+                                                    className="metric-pill",
+                                                    children=[
+                                                        html.Div("Tumor Regions", className="metric-label"),
+                                                        html.Div("Whole · Core · Enh.", className="metric-value"),
+                                                    ],
+                                                ),
+                                            ],
+                                            style={"marginTop": "6px"},
+                                        ),
+                                        html.Div(
+                                            style={"display": "flex", "gap": "0.75rem", "marginTop": "12px"},
+                                            children=[
+                                                dcc.Link(
+                                                    html.Button("Upload your scan", className="primary-btn"),
+                                                    href="/upload",
+                                                    style={"textDecoration": "none"},
+                                                ),
+                                                dcc.Link(
+                                                    html.Button("View sample", className="ghost-btn"),
+                                                    href="/",
+                                                    style={"textDecoration": "none"},
+                                                ),
+                                            ],
+                                        ),
                                     ],
-                                ),
-                            ],
-                        ),
-                        html.Div(
-                            style={"display": "flex", "gap": "0.75rem", "marginTop": "12px"},
-                            children=[
-                                dcc.Link(
-                                    html.Button("Upload your scan", className="primary-btn"),
-                                    href="/upload",
-                                    style={"textDecoration": "none"},
-                                ),
-                                dcc.Link(
-                                    html.Button("View sample", className="ghost-btn"),
-                                    href="/",
-                                    style={"textDecoration": "none"},
+                                    style={
+                                        "display": "flex",
+                                        "flexDirection": "column",
+                                        "rowGap": "8px",
+                                        "flex": "1 1 320px",
+                                        "minWidth": "300px",
+                                        "maxWidth": "420px",
+                                    },
                                 ),
                             ],
                         ),
                     ],
                 ),
-                # Right: Sample visualization
+                # Below: Sample Prediction section (internal layout unchanged)
                 html.Div(
                     className="glass-card",
                     children=[
@@ -730,6 +560,14 @@ page_1_layout = html.Div(
                             ],
                             multiple=True,
                         ),
+                        html.Div(
+                            className="upload-feedback",
+                            children=[
+                                html.Div(id="upload-status", className="upload-note"),
+                                html.Div(id="uploaded-files", className="upload-note"),
+                                html.Div(id="upload-warning", className="upload-note upload-warning"),
+                            ],
+                        ),
                     ],
                 ),
                 html.Div(
@@ -741,6 +579,122 @@ page_1_layout = html.Div(
                             className="upload-note",
                         ),
                         html.Div(id="output-image-upload", className="results-grid"),
+                        html.Div(
+                            className="glass-card",
+                            children=[
+                                html.Div("Export & Report", className="result-heading"),
+                                html.Div(
+                                    "Download predictions or a lightweight HTML report. "
+                                    "Identifiers are removed; only the generated case ID is used.",
+                                    className="upload-note",
+                                ),
+                                html.Div(
+                                    style={
+                                        "display": "flex",
+                                        "flexWrap": "wrap",
+                                        "gap": "10px",
+                                        "alignItems": "center",
+                                    },
+                                    children=[
+                                        html.Button("Download mask (NIfTI)", id="download-mask-btn", className="primary-btn"),
+                                        html.Button("Export HTML report", id="download-report-btn", className="ghost-btn"),
+                                        html.Div(id="export-status", className="upload-note"),
+                                        dcc.Download(id="download-mask"),
+                                        dcc.Download(id="download-report"),
+                                    ],
+                                ),
+                            ],
+                        ),
+                        html.Div(
+                            className="glass-card",
+                            children=[
+                                html.Div("2D Slice Viewer", className="result-heading"),
+                                html.Div(
+                                    [
+                                        dcc.Dropdown(
+                                            id="plane-dropdown",
+                                            options=[
+                                                {"label": "Axial (Z)", "value": "axial"},
+                                                {"label": "Coronal (Y)", "value": "coronal"},
+                                                {"label": "Sagittal (X)", "value": "sagittal"},
+                                            ],
+                                            value="axial",
+                                            clearable=False,
+                                            style={"width": "220px"},
+                                        ),
+                                        dcc.Slider(
+                                            id="slice-slider",
+                                            min=0,
+                                            max=127,
+                                            step=1,
+                                            value=0,
+                                            tooltip={"placement": "bottom", "always_visible": False},
+                                        ),
+                                    ],
+                                    style={"display": "flex", "flexDirection": "column", "gap": "10px"},
+                                ),
+                                dcc.Graph(id="slice-view", config={"displaylogo": False}, style={"width": "100%"}),
+                                html.Div(id="metrics-panel", className="upload-note"),
+                            ],
+                        ),
+                        html.Div(
+                            className="glass-card",
+                            children=[
+                                html.Div("3D View", className="result-heading"),
+                                html.Div(
+                                    "Hologram meshes derived from the predicted mask. Downsampled for speed.",
+                                    className="upload-note",
+                                ),
+                                html.Div(
+                                    style={
+                                        "display": "flex",
+                                        "flexWrap": "wrap",
+                                        "gap": "12px",
+                                        "alignItems": "center",
+                                    },
+                                    children=[
+                                        dcc.Checklist(
+                                            id="mesh-classes",
+                                            options=[
+                                                {"label": "Whole", "value": "whole"},
+                                                {"label": "Core", "value": "core"},
+                                                {"label": "Enhancing", "value": "enhancing"},
+                                            ],
+                                            value=["whole", "core", "enhancing"],
+                                            inline=True,
+                                            inputClassName="pill-check",
+                                            labelStyle={"marginRight": "8px"},
+                                        ),
+                                        dcc.RadioItems(
+                                            id="brain-toggle",
+                                            options=[
+                                                {"label": "Tumor only", "value": "tumor"},
+                                                {"label": "Brain + Tumor", "value": "brain"},
+                                            ],
+                                            value="tumor",
+                                            inline=True,
+                                            labelStyle={"marginRight": "12px"},
+                                        ),
+                                        html.Div(
+                                            style={"display": "flex", "alignItems": "center", "gap": "8px"},
+                                            children=[
+                                                html.Span("Opacity", className="upload-note"),
+                                                dcc.Slider(
+                                                    id="mesh-opacity",
+                                                    min=0.2,
+                                                    max=1.0,
+                                                    step=0.1,
+                                                    value=0.6,
+                                                    tooltip={"placement": "bottom", "always_visible": False},
+                                                ),
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                                dcc.Graph(id="holo-graph", config={"displaylogo": False}, style={"width": "100%", "height": "560px"}),
+                                html.Div(id="holo-status", className="upload-note"),
+                            ],
+                        ),
                     ],
                 ),
             ],
@@ -748,50 +702,304 @@ page_1_layout = html.Div(
     ],
 )
 
-def parse_contents(filename):
-    # Load and render a single saved NIfTI file by filename
-    img, msk = input_image(filename)
-    return html.Div([
-        html.Div([
-            dcc.Graph(id='g1', figure=img)
-        ], className="six columns"),
+def safe_case_id(name: str) -> str:
+    """Sanitize case identifiers to avoid leaking PHI in filenames."""
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_")
+    return cleaned or "case"
 
-        html.Div([
-            dcc.Graph(id='g2', figure=msk)
-        ], className="six columns"),
-    ], className="row")
+
+def get_spacing(meta_json: str) -> Tuple[float, float, float]:
+    spacing = (1.0, 1.0, 1.0)
+    if not meta_json:
+        return spacing
+    meta, err = safe_meta(meta_json)
+    if meta is None or err:
+        return spacing
+    aff = np.array(meta.get("affine", np.eye(4)))
+    return tuple(np.abs(np.diag(aff)[:3]).tolist())
+
+
+def arr_to_b64(arr: np.ndarray) -> str:
+    buf = io.BytesIO()
+    np.save(buf, arr, allow_pickle=False)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def b64_to_arr(s: str) -> np.ndarray:
+    return np.load(io.BytesIO(base64.b64decode(s)), allow_pickle=False)
+
+
+def safe_b64_to_arr(s: str) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    if not s:
+        return None, "Missing cached array."
+    try:
+        return b64_to_arr(s), None
+    except Exception as exc:
+        return None, f"Resetting cached array: {exc}"
+
+
+def safe_meta(meta_json: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    if not meta_json:
+        return None, "Missing metadata."
+    try:
+        return json.loads(meta_json), None
+    except Exception as exc:
+        return None, f"Resetting cached metadata: {exc}"
+
+
+def downsample_volume(vol: np.ndarray, target_max_dim: int = 96) -> Tuple[np.ndarray, Tuple[int, int, int]]:
+    factors = []
+    for dim in vol.shape[:3]:
+        factors.append(max(1, int(np.ceil(dim / target_max_dim))))
+    fz, fy, fx = factors
+    ds = vol[::fz, ::fy, ::fx]
+    return ds, (fz, fy, fx)
+
+
+def make_mesh(region: np.ndarray, spacing: Tuple[float, float, float]) -> Tuple[np.ndarray, np.ndarray]:
+    verts, faces, _, _ = measure.marching_cubes(region.astype(np.float32), level=0.5, spacing=spacing)
+    return verts, faces
+
+
+def make_brain_surface(vol: np.ndarray, spacing: Tuple[float, float, float]) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    brain_vol = vol[..., 0]
+    brain_vol = np.where(np.isnan(brain_vol), 0, brain_vol)
+    positives = brain_vol[brain_vol > 0]
+    if positives.size == 0:
+        return None
+    thr = float(np.percentile(positives, 60))
+    brain_mask = (brain_vol > thr).astype(np.uint8)
+    if brain_mask.sum() < 500:
+        return None
+    return make_mesh(brain_mask, spacing)
+
+
+def build_hologram_figure(
+    vol: np.ndarray,
+    mask: np.ndarray,
+    spacing: Tuple[float, float, float],
+    enabled_classes: List[str],
+    opacity: float,
+    mode: str,
+) -> Tuple[go.Figure, str]:
+    base_trace = []
+    status = []
+
+    # Downsample to keep marching cubes light
+    mask_ds, (fz, fy, fx) = downsample_volume(mask)
+    vol_ds, _ = downsample_volume(vol)
+    spacing_ds = (spacing[0] * fz, spacing[1] * fy, spacing[2] * fx)
+
+    regions = {
+        "whole": (mask_ds > 0, "#52c7ff"),
+        "core": (np.isin(mask_ds, [2, 3]), "#ff7a1a"),
+        "enhancing": (mask_ds == 3, "#ff3366"),
+    }
+    for key, (region, color) in regions.items():
+        if key not in enabled_classes:
+            continue
+        if region.sum() < 50:
+            status.append(f"No voxels for {key}.")
+            continue
+        try:
+            verts, faces = make_mesh(region, spacing_ds)
+            base_trace.append(
+                go.Mesh3d(
+                    x=verts[:, 0],
+                    y=verts[:, 1],
+                    z=verts[:, 2],
+                    i=faces[:, 0],
+                    j=faces[:, 1],
+                    k=faces[:, 2],
+                    color=color,
+                    opacity=opacity,
+                    name=key.title(),
+                    flatshading=True,
+                )
+            )
+        except Exception as exc:
+            status.append(f"{key} mesh failed: {exc}")
+
+    # Optional brain surface
+    if mode == "brain" and vol_ds.size > 0:
+        brain_mesh = make_brain_surface(vol_ds, spacing_ds)
+        if brain_mesh:
+            verts, faces = brain_mesh
+            base_trace.insert(
+                0,
+                go.Mesh3d(
+                    x=verts[:, 0],
+                    y=verts[:, 1],
+                    z=verts[:, 2],
+                    i=faces[:, 0],
+                    j=faces[:, 1],
+                    k=faces[:, 2],
+                    color="lightgray",
+                    opacity=0.18,
+                    name="Brain surface",
+                    flatshading=True,
+                ),
+            )
+        else:
+            status.append("Brain surface skipped (low signal).")
+
+    layout = go.Layout(
+        scene=dict(
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            zaxis=dict(visible=False),
+            aspectmode="data",
+        ),
+        margin=dict(l=0, r=0, t=30, b=0),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", yanchor="bottom"),
+        title="3D Hologram View",
+    )
+    fig = go.Figure(data=base_trace, layout=layout)
+    if not base_trace:
+        fig.add_annotation(text="No meshes to show.", showarrow=False)
+        status.append("Nothing to render.")
+    fig.update_layout(uirevision="holo")
+    status_text = " | ".join(status) if status else "Ready."
+    return fig, status_text
+
+
+def build_slice_html(vol: np.ndarray, mask: np.ndarray, plane: str, spacing: Tuple[float, float, float]) -> str:
+    axis_len = vol.shape[2] if plane == "axial" else vol.shape[1] if plane == "coronal" else vol.shape[0]
+    idx = axis_len // 2
+    vol_slice, mask_slice = slice_by_plane(vol, mask, plane, idx)
+    fig = make_slice_figure(vol_slice, mask_slice)
+    fig.update_layout(width=420, height=420, title=f"{plane.title()} slice @ {idx}")
+    return pio.to_html(fig, include_plotlyjs="cdn", full_html=False)
+
+
+def build_report_html(case_id: str, vol: np.ndarray, mask: np.ndarray, spacing: Tuple[float, float, float]) -> str:
+    metrics = compute_metrics(mask, spacing)
+    rows = "".join(
+        f"<tr><td>{c['class']}</td><td>{c['voxels']}</td><td>{c['ml']}</td></tr>"
+        for c in metrics["classes"]
+    )
+    slices_html = "".join(
+        build_slice_html(vol, mask, plane, spacing) for plane in ["axial", "coronal", "sagittal"]
+    )
+    html_doc = f"""
+    <html>
+    <head>
+        <meta charset="utf-8"/>
+        <title>Segmentation Report - {case_id}</title>
+    </head>
+    <body style="font-family:Arial,sans-serif; background:#0b0b14; color:#e8ecf1;">
+        <h2>Segmentation Report</h2>
+        <p>Case ID: {case_id}</p>
+        <p>Backend/runtime: Dash UI (pre-computed)</p>
+        <h3>Volumes (ml)</h3>
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+            <tr><th>Class</th><th>Voxels</th><th>Volume (ml)</th></tr>
+            {rows}
+        </table>
+        <h3>Key slices with overlays</h3>
+        {slices_html}
+    </body>
+    </html>
+    """
+    return html_doc
+
+
+def parse_contents(filename: str, case_id: str) -> Tuple[Any, str, str, str, str]:
+    """Load, run prediction, and package data for UI stores."""
+    warning = ""
+    fig1, fig2, vol, msk, affine = input_image(filename)
+    if vol.shape != EXPECTED_MASK_SHAPE or msk.shape != EXPECTED_MASK_SHAPE:
+        warning = (
+            f"Warning: processed volume/mask shape {vol.shape} differs from expected {EXPECTED_MASK_SHAPE}. "
+            "Visualization may be limited."
+        )
+    children = html.Div(
+        [
+            html.Div([dcc.Graph(id="g1", figure=fig1)], className="six columns"),
+            html.Div([dcc.Graph(id="g2", figure=fig2)], className="six columns"),
+        ],
+        className="row",
+    )
+    return (
+        children,
+        arr_to_b64(vol),
+        arr_to_b64(msk),
+        json.dumps({"affine": affine.tolist()}),
+        warning,
+    )
 
 
 @app.callback(
-    Output('output-image-upload', 'children'),
-    Input('upload-image', 'contents'),
-    State('upload-image', 'filename'),
+    Output("output-image-upload", "children"),
+    Output("vol-store", "data"),
+    Output("mask-store", "data"),
+    Output("meta-store", "data"),
+    Output("case-store", "data"),
+    Output("upload-status", "children"),
+    Output("uploaded-files", "children"),
+    Output("upload-warning", "children"),
+    Input("upload-image", "contents"),
+    State("upload-image", "filename"),
 )
 def update_output(image_contents, filenames):
     if not image_contents or not filenames:
-        return
+        status = "Awaiting upload..."
+        file_list = html.Div("No files uploaded yet.")
+        return None, None, None, None, None, status, file_list, ""
 
     saved_files = []
+    original_names = []
+    warnings = []
     os.makedirs(config.IMAGES_DATA_DIR, exist_ok=True)
 
     for content_str, original_name in zip(image_contents, filenames):
         ext = "".join(Path(original_name).suffixes) or ".nii"
-        # Only accept NIfTI uploads
         if ext.lower() not in [".nii", ".nii.gz"]:
-            return html.Div(
-                "Please upload NIfTI files (.nii or .nii.gz).",
-                style={"color": "red", "padding": "10px"},
+            msg = "Please upload NIfTI files (.nii or .nii.gz)."
+            return (
+                html.Div(msg, style={"color": "red", "padding": "10px"}),
+                None,
+                None,
+                None,
+                None,
+                "Invalid file type.",
+                html.Div("No files saved. Please upload .nii or .nii.gz."),
+                msg,
             )
 
         data = content_str.split(",")[1]
+        size_mb = len(data) * 0.75 / (1024 * 1024)
+        if size_mb > MAX_FILE_MB:
+            warnings.append(f"File {original_name} is {size_mb:.1f} MB; this may be too large to render.")
+
         save_name = f"image_{len(saved_files)+1}{ext}"
         save_path = Path(config.IMAGES_DATA_DIR) / save_name
         with open(save_path, "wb") as fp:
             fp.write(base64.b64decode(data))
         saved_files.append(save_name)
+        original_names.append(original_name)
 
-    # Only display the first uploaded file for now
-    return [parse_contents(saved_files[0])]
+    case_id = safe_case_id(f"case_{datetime.datetime.utcnow().strftime('%Y%m%d%H%M%S')}")
+    children, vol_b64, mask_b64, meta_json, inference_warning = parse_contents(saved_files[0], case_id)
+    if inference_warning:
+        warnings.append(inference_warning)
+    status = f"Uploaded {len(saved_files)} file(s) successfully."
+    file_list = html.Div(
+        [
+            html.Div(
+                [
+                    html.Span("*", className="file-dot"),
+                    html.Span(orig, className="file-name"),
+                ],
+                className="file-pill",
+            )
+            for orig in original_names
+        ]
+    )
+    warning_block = html.Div([html.Div(w) for w in warnings]) if warnings else ""
+    return [children], vol_b64, mask_b64, meta_json, case_id, status, file_list, warning_block
 
 @app.callback(Output('page-content', 'children'),
               [Input('url', 'pathname')])
@@ -801,6 +1009,243 @@ def display_page(pathname):
         return page_1_layout
     else:
         return index_page
+
+
+# ----- Slice viewer & metrics -----
+def slice_by_plane(vol: np.ndarray, mask: np.ndarray, plane: str, idx: int) -> Tuple[np.ndarray, np.ndarray]:
+    if plane == "axial":
+        vol_slice = vol[:, :, idx]
+        mask_slice = mask[:, :, idx]
+    elif plane == "coronal":
+        vol_slice = vol[:, idx, :]
+        mask_slice = mask[:, idx, :]
+    else:  # sagittal
+        vol_slice = vol[idx, :, :]
+        mask_slice = mask[idx, :, :]
+    return vol_slice, mask_slice
+
+
+def make_slice_figure(vol_slice: np.ndarray, mask_slice: np.ndarray) -> go.Figure:
+    fig = go.Figure()
+    fig.add_trace(go.Heatmap(z=vol_slice, colorscale="gray", showscale=False))
+    fig.add_trace(
+        go.Heatmap(
+            z=np.ma.masked_where(mask_slice == 0, mask_slice),
+            colorscale=[[0, "rgba(0,0,0,0)"], [1, "rgba(82,199,255,0.65)"]],
+            showscale=False,
+            opacity=0.8,
+        )
+    )
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=0, b=0),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False, scaleanchor="x"),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig
+
+
+def compute_metrics(mask: np.ndarray, spacing: Tuple[float, float, float]) -> Dict[str, Any]:
+    voxel_vol_ml = float(np.prod(spacing) / 1000.0)
+    metrics = {"voxel_volume_ml": voxel_vol_ml, "classes": []}
+    for cls in sorted(np.unique(mask)):
+        if cls == 0:
+            continue
+        vox = int((mask == cls).sum())
+        metrics["classes"].append({"class": int(cls), "voxels": vox, "ml": round(vox * voxel_vol_ml, 3)})
+    return metrics
+
+
+@app.callback(
+    Output("slice-view", "figure"),
+    Output("slice-slider", "max"),
+    Output("slice-slider", "value"),
+    Output("metrics-panel", "children"),
+    Input("vol-store", "data"),
+    Input("mask-store", "data"),
+    Input("meta-store", "data"),
+    Input("plane-dropdown", "value"),
+    Input("slice-slider", "value"),
+)
+def update_slice(vol_b64, mask_b64, meta_json, plane, slice_idx):
+    vol, vol_err = safe_b64_to_arr(vol_b64)
+    mask, mask_err = safe_b64_to_arr(mask_b64)
+    if vol is None or mask is None:
+        msg = vol_err or mask_err or "Awaiting upload or data reset due to incompatible cached content."
+        return go.Figure(), 0, 0, msg
+
+    # Validate shape compatibility
+    if vol.ndim != 3 or mask.ndim != 3 or vol.shape != mask.shape:
+        return go.Figure(), 0, 0, "Stored data schema mismatch; please re-upload."
+
+    spacing = get_spacing(meta_json)
+
+    axis_len = vol.shape[2] if plane == "axial" else vol.shape[1] if plane == "coronal" else vol.shape[0]
+    if slice_idx is None or not isinstance(slice_idx, int) or slice_idx >= axis_len or slice_idx < 0:
+        slice_idx = axis_len // 2
+
+    vol_slice, mask_slice = slice_by_plane(vol, mask, plane, slice_idx)
+    fig = make_slice_figure(vol_slice, mask_slice)
+
+    metrics = compute_metrics(mask, spacing)
+    metrics_text = [html.Div(f"Voxel volume: {metrics['voxel_volume_ml']:.4f} ml")]
+    metrics_text += [html.Div(f"Class {c['class']}: {c['voxels']} voxels | {c['ml']} ml") for c in metrics["classes"]]
+    if vol_err or mask_err:
+        metrics_text.append(html.Div(vol_err or mask_err, style={"color": "orange"}))
+
+    return fig, axis_len - 1, slice_idx, metrics_text
+
+
+@app.callback(
+    Output("holo-graph", "figure"),
+    Output("holo-status", "children"),
+    Input("vol-store", "data"),
+    Input("mask-store", "data"),
+    Input("meta-store", "data"),
+    Input("mesh-classes", "value"),
+    Input("mesh-opacity", "value"),
+    Input("brain-toggle", "value"),
+)
+def update_hologram(vol_b64, mask_b64, meta_json, classes, opacity, mode):
+    vol, vol_err = safe_b64_to_arr(vol_b64)
+    mask, mask_err = safe_b64_to_arr(mask_b64)
+
+    status_msgs = []
+    if vol_err:
+        status_msgs.append(vol_err)
+    if mask_err:
+        status_msgs.append(mask_err)
+
+    if vol is None or mask is None:
+        fig = go.Figure()
+        fig.add_annotation(text="Awaiting upload.", showarrow=False)
+        fig.update_layout(margin=dict(l=0, r=0, t=20, b=0))
+        return fig, "Awaiting upload or cache reset."
+
+    if vol.ndim != 3 or mask.ndim != 3 or vol.shape != mask.shape:
+        fig = go.Figure()
+        fig.add_annotation(text="Shape mismatch; please re-upload.", showarrow=False)
+        fig.update_layout(margin=dict(l=0, r=0, t=20, b=0))
+        return fig, "Stored data schema mismatch; please re-upload."
+
+    spacing = get_spacing(meta_json)
+    enabled_classes = classes or []
+    fig, base_status = build_hologram_figure(
+        vol=vol,
+        mask=mask,
+        spacing=spacing,
+        enabled_classes=enabled_classes,
+        opacity=opacity if opacity else 0.6,
+        mode=mode if mode else "tumor",
+    )
+    msg = base_status
+    if status_msgs:
+        msg = " | ".join([base_status] + status_msgs if base_status else status_msgs)
+    return fig, msg or "Ready."
+
+
+@app.callback(
+    Output("download-mask", "data"),
+    Output("download-report", "data"),
+    Output("export-status", "children"),
+    Input("download-mask-btn", "n_clicks"),
+    Input("download-report-btn", "n_clicks"),
+    State("mask-store", "data"),
+    State("vol-store", "data"),
+    State("meta-store", "data"),
+    State("case-store", "data"),
+    prevent_initial_call=True,
+)
+def handle_exports(mask_clicks, report_clicks, mask_b64, vol_b64, meta_json, case_data):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return dash.no_update, dash.no_update, dash.no_update
+    trigger = ctx.triggered[0]["prop_id"].split(".")[0]
+    case_id = safe_case_id(case_data or "case")
+
+    if trigger == "download-mask-btn":
+        # Defensive checks for mask presence and shape
+        mask, err = safe_b64_to_arr(mask_b64)
+        if mask is None:
+            return dash.no_update, dash.no_update, err or "Mask unavailable; please re-upload."
+        if mask.ndim != 3:
+            return dash.no_update, dash.no_update, "Mask is not 3D; export aborted."
+
+        # Affine from metadata (fallback to identity). Ensure 4x4
+        affine = np.eye(4)
+        meta, _ = safe_meta(meta_json) if meta_json else (None, None)
+        if meta and isinstance(meta, dict) and "affine" in meta:
+            try:
+                aff = np.array(meta["affine"], dtype=float)
+                if aff.shape == (4, 4):
+                    affine = aff
+            except Exception:
+                pass
+
+        # Save NIfTI to a temporary .nii.gz file (Windows-safe), then stream bytes
+        import tempfile, os
+        import pathlib
+        tmp_file = None
+        try:
+            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".nii.gz")
+            tmp_path = tmp_file.name
+            tmp_file.close()  # close handle before nib.save on Windows
+            img = nib.Nifti1Image(mask.astype(np.uint8, copy=False), affine)
+            nib.save(img, tmp_path)
+            with open(tmp_path, "rb") as f:
+                content = f.read()
+        finally:
+            if tmp_file is not None:
+                try:
+                    os.remove(tmp_file.name)
+                except Exception:
+                    pass
+
+        filename = f"{case_id}_pred_mask.nii.gz"
+        data = dcc.send_bytes(lambda b: b.write(content), filename)
+        return data, dash.no_update, "Mask download ready."
+
+    if trigger == "download-report-btn":
+        vol, v_err = safe_b64_to_arr(vol_b64)
+        mask, m_err = safe_b64_to_arr(mask_b64)
+        if vol is None or mask is None:
+            msg = v_err or m_err or "Data unavailable; please re-upload."
+            return dash.no_update, dash.no_update, msg
+        spacing = get_spacing(meta_json)
+        html_report = build_report_html(case_id, vol, mask, spacing)
+        data = dict(content=html_report, filename=f"{case_id}_report.html", type="text/html")
+        return dash.no_update, data, "Report download ready."
+
+    return dash.no_update, dash.no_update, dash.no_update
+
+# One-time clientside init to purge any persisted Store content from older app versions.
+app.clientside_callback(
+    """
+    function(pathname, init) {
+        const first = init !== "done";
+        if (first) {
+            // Purge only small metadata keys; big Stores are memory-only
+            try {
+                ['meta-store','case-store'].forEach(function(id) {
+                    try { window.sessionStorage.removeItem(id); } catch(e) {}
+                    try { window.localStorage.removeItem(id); } catch(e) {}
+                });
+            } catch(e) {}
+        }
+        // clear_data flags mirror 'first' so stores reset on initial load only
+        return ["done", first, first, first, first, first];
+    }
+    """,
+    Output('init-flag', 'data'),
+    Output('vol-store', 'clear_data'),
+    Output('mask-store', 'clear_data'),
+    Output('meta-store', 'clear_data'),
+    Output('case-store', 'clear_data'),
+    Output('holo-store', 'clear_data'),
+    Input('url', 'pathname'),
+    State('init-flag', 'data'),
+)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run Dash app")
