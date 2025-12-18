@@ -5,7 +5,6 @@ plotly==6.5.0
 dash==3.3.0
 nibabel==5.2.1
 SimpleITK==2.5.3
-monai==1.5.1
 packaging==25.0
 scipy==1.10.1
 onnx==1.16.1

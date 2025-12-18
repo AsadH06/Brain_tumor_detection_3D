@@ -27,7 +27,7 @@ jobs:
           python -m venv venv
           source venv/bin/activate
       
-      - name: Install dependencies
+      - name: Install runtime dependencies (inference + Dash)
         run: pip install -r requirements.txt
         
       # Optional: Add step to run tests here (PyTest, Django test suites, etc.)

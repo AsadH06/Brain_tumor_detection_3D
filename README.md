@@ -46,7 +46,7 @@ for the 70th slide.
 And now to get a look at all the slides, I have made this animation.
 <p align = "center"><img align = "center" src = "images/final.gif", width="320px"/></p>
 
-<<h2 id="Setup">Setup</h2>
+<h2 id="Setup">Setup</h2>
 
 ## Environment Setup (Conda – Recommended)
 
@@ -68,7 +68,11 @@ Create environment: <code>conda create -n brain_tumor python=3.8</code>
 Activate environment: <code>conda activate brain_tumor</code>
 
 
-Install requirements: <code>pip install -r requirements.txt</code>
+Install runtime requirements (inference + Dash app): <code>pip install -r requirements.txt</code>
+
+Training or MONAI/PyTorch workflows: <code>pip install -r requirements-train.txt</code>
+
+Note: GitHub Actions deployments only install <code>requirements.txt</code> to avoid TensorFlow/PyTorch conflicts; use the training file locally or in dedicated training jobs.
 
 Run the application file : <code>python application.py</code>
 
