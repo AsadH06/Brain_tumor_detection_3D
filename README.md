@@ -48,6 +48,17 @@ And now to get a look at all the slides, I have made this animation.
 
 <<h2 id="Setup">Setup</h2>
 
+## Environment Setup (Conda – Recommended)
+
+This project uses Conda to manage dependencies.
+
+### Create the environment
+
+```bash
+conda env create -f environment.yml
+conda activate <env-name>
+```
+
 Clone the repository : <code>git clone https://github.com/Shreyz-max/3D-Brain-Tumor-Segmentation.git</code>
 
 3D-Brain-Tumor-Segmentation: <code>cd 3D-Brain-Tumor-Segmentation</code>
@@ -55,6 +66,7 @@ Clone the repository : <code>git clone https://github.com/Shreyz-max/3D-Brain-Tu
 Create environment: <code>conda create -n brain_tumor python=3.8</code>
 
 Activate environment: <code>conda activate brain_tumor</code>
+
 
 Install requirements: <code>pip install -r requirements.txt</code>
 
