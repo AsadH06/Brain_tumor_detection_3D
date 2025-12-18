@@ -1,0 +1,22 @@
+name: brain_tumor
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.8
+  - pip
+  - pip:
+      - tensorflow==2.13.0
+      - numpy==1.24.3
+      - pandas==2.0.3
+      - plotly==6.5.0
+      - dash==3.3.0
+      - nibabel==5.2.1
+      - SimpleITK==2.5.3
+      - monai==1.5.1
+      - packaging==25.0
+      - scipy==1.10.1
+      - onnx==1.16.1
+      - onnxruntime==1.19.2
+      - tf2onnx==1.16.1
+      - scikit-image==0.24.0
