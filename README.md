@@ -68,6 +68,9 @@ Create environment: <code>conda create -n brain_tumor python=3.8</code>
 Activate environment: <code>conda activate brain_tumor</code>
 
 
+Note: `requirements.txt` targets Python 3.8-3.11 (TensorFlow 2.13 has no wheels for Python 3.12). If you are on Python 3.12, use the Conda environment above or install Python 3.11.
+
+
 Install runtime requirements (inference + Dash app): <code>pip install -r requirements.txt</code>
 
 Training or MONAI/PyTorch workflows: <code>pip install -r requirements-train.txt</code>

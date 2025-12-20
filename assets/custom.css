@@ -1,3 +1,6 @@
+:root {
+    --nav-height: 72px;
+}
 body {
     margin: 0;
     padding: 0;
@@ -12,13 +15,14 @@ body {
     align-items: stretch;
     justify-content: stretch;
     background: radial-gradient(circle at top left, #181820 0, #050509 45%, #000000 100%);
-    padding-top: 12px; /* reduced to minimize gap below fixed navbar */
+    padding-top: var(--nav-height); /* global offset for fixed navbar */
 }
 .nav-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 18px 42px;
+    height: var(--nav-height);
+    padding: 0 42px;
     position: fixed;
     top: 0;
     left: 0;
@@ -98,7 +102,7 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 16px 42px 40px; /* explicit 16px spacing below navbar */
+    padding: 16px 42px 40px;
     gap: 24px; /* consistent 24px spacing between sections on desktop */
 }
 @media (max-width: 1024px) {

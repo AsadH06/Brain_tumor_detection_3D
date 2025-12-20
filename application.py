@@ -342,7 +342,6 @@ app.layout = html.Div(
 )
 
 index_page = html.Div(
-    className="glass-shell",
     children=[
         html.Div(
             className="nav-bar",
@@ -501,7 +500,6 @@ index_page = html.Div(
 )
 
 page_1_layout = html.Div(
-    className="glass-shell",
     children=[
         html.Div(
             className="nav-bar",

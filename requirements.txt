@@ -1,3 +1,4 @@
+# Requires Python 3.8-3.11 (TensorFlow 2.13 wheels are not available for 3.12).
 tensorflow==2.13.0
 numpy==1.24.3
 pandas==2.0.3
